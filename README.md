@@ -4,9 +4,13 @@
 # International Telephone Input [![Build Status](https://travis-ci.org/jackocnr/intl-tel-input.svg?branch=master)](https://travis-ci.org/jackocnr/intl-tel-input) <img src="https://img.shields.io/github/package-json/v/jackocnr/intl-tel-input.svg" /> <img src="https://img.shields.io/npm/dm/intl-tel-input.svg" />
 A JavaScript plugin for entering and validating international telephone numbers. It adds a flag dropdown to any input, detects the user's country, displays a relevant placeholder and provides formatting/validation methods.
 
-<img src="https://raw.github.com/jackocnr/intl-tel-input/master/screenshots/vanilla.png" width="424px" height="246px">
+<img src="https://raw.github.com/jackocnr/intl-tel-input/master/screenshots/vanilla.png" width="424" height="246" />
 
 If you like it, please consider making a donation, which you can do from [the demo page](http://intl-tel-input.com).
+
+## Sponsored by
+<img src="https://raw.github.com/jackocnr/intl-tel-input/master/screenshots/twilio.png" height="100" />
+Use <a href="https://www.twilio.com/blog/international-telephone-input-twilio?utm_source=github&utm_medium=referral&utm_campaign=intl_tel_input">Twilio's API to build phone verification, SMS 2FA, appointment reminders, marketing notifications and so much more</a>. We can't wait to see what you build.
 
 ## Table of Contents
 
