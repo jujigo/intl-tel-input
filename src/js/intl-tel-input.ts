@@ -310,6 +310,7 @@ export class Iti {
   private _handleCountryContainerKeydown: (e: KeyboardEvent) => void;
   private _handleInputEvent: (e: InputEvent) => void;
   private _handleKeydownEvent: (e: KeyboardEvent) => void;
+  private _handlePasteEvent: (e: ClipboardEvent) => void;
   private _handleWindowScroll: () => void;
   private _handleMouseoverCountryList: (e: MouseEvent) => void;
   private _handleClickCountryList: (e: Event) => void;
@@ -489,6 +490,10 @@ export class Iti {
 
   //* Add a dial code to this.dialCodeToIso2Map.
   private _addToDialCodeMap(iso2: string, dialCode: string, priority?: number): void {
+    // Bail if no iso2 or dialCode (this can happen with onlyCountries or excludeCountries options).
+    if (!iso2 || !dialCode) {
+      return;
+    }
     //* Update dialCodeMaxLen.
     if (dialCode.length > this.dialCodeMaxLen) {
       this.dialCodeMaxLen = dialCode.length;
@@ -564,6 +569,12 @@ export class Iti {
         this.dialCodes.add(c.dialCode);
       }
       this._addToDialCodeMap(c.iso2, c.dialCode, c.priority);
+    }
+    // if any countries have been excluded, cleanup empty array entries in dialCodeToIso2Map due to the use of c.priority to insert at specific indexes
+    if (this.options.onlyCountries.length || this.options.excludeCountries.length) {
+      this.dialCodes.forEach((dialCode) => {
+        this.dialCodeToIso2Map[dialCode] = this.dialCodeToIso2Map[dialCode].filter(Boolean);
+      });
     }
 
     //* Next: add area codes.
@@ -1100,7 +1111,7 @@ export class Iti {
   private _openDropdownWithPlus(): void {
     this._openDropdown();
     this.searchInput.value = "+";
-    this._filterCountries("", true);
+    this._filterCountries("");
   }
 
   //* Initialize the tel input listeners.
@@ -1198,6 +1209,51 @@ export class Iti {
         }
       };
       this.telInput.addEventListener("keydown", this._handleKeydownEvent);
+    }
+
+    // Sanitise pasted values in strictMode
+    if (strictMode) {
+      this._handlePasteEvent = (e: ClipboardEvent): void => {
+        // in strict mode we always control the pasted value
+        e.preventDefault();
+
+        // shortcuts
+        const input = this.telInput;
+        const selStart = input.selectionStart;
+        const selEnd = input.selectionEnd;
+
+        const pasted = e.clipboardData.getData("text");
+        // only allow a plus in the pasted content if there's not already one in the input, or the existing one is selected to be replaced by the pasted content
+        const initialCharSelected = selStart === 0 && selEnd > 0;
+        const allowLeadingPlus = !input.value.startsWith("+") || initialCharSelected;
+        // just numerics and pluses
+        const allowedChars = pasted.replace(/[^0-9+]/g, "");
+        const hasLeadingPlus = allowedChars.startsWith("+");
+        // just numerics
+        const numerics = allowedChars.replace(/\+/g, "");
+        const sanitised = hasLeadingPlus && allowLeadingPlus ? `+${numerics}` : numerics;
+
+        let newVal = input.value.slice(0, selStart) + sanitised + input.value.slice(selEnd);
+        // check length
+        const coreNumber = intlTelInput.utils.getCoreNumber(newVal, this.selectedCountryData.iso2);
+        if (this.maxCoreNumberLength && coreNumber.length > this.maxCoreNumberLength) {
+          if (input.selectionEnd === input.value.length) {
+            // if they try to paste too many digits at the end, then just trim the excess
+            const trimLength = coreNumber.length - this.maxCoreNumberLength;
+            newVal = newVal.slice(0, newVal.length - trimLength);
+          } else {
+            // if they try to paste too many digits in the middle, then just ignore the paste entirely
+            return;
+          }
+        }
+        input.value = newVal;
+        const caretPos = selStart + sanitised.length;
+        input.setSelectionRange(caretPos, caretPos);
+
+        // trigger format-as-you-type and country update etc
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      };
+      this.telInput.addEventListener("paste", this._handlePasteEvent);
     }
   }
 
@@ -1361,11 +1417,7 @@ export class Iti {
     if (this.options.countrySearch) {
       const doFilter = (): void => {
         const inputQuery = this.searchInput.value.trim();
-        if (inputQuery) {
-          this._filterCountries(inputQuery);
-        } else {
-          this._filterCountries("", true);
-        }
+        this._filterCountries(inputQuery);
         // show/hide clear button
         if (this.searchInput.value) {
           this.searchClearButton.classList.remove("iti__hide");
@@ -1412,48 +1464,51 @@ export class Iti {
   }
 
   //* Country search enabled: Filter the countries according to the search query.
-  private _filterCountries(query: string, isReset: boolean = false): void {
+  private _filterCountries(query: string): void {
     let noCountriesAddedYet = true;
     this.countryList.innerHTML = "";
     const normalisedQuery = normaliseString(query);
-    const queryLength = normalisedQuery.length;
+    let matchedCountries;
 
-    // search result groups, in order of priority
-    // first, exact ISO2 matches, then name starts with, then name contains, dial code match etc.
-    const iso2Matches = [];
-    const nameStartWith = [];
-    const nameContains = [];
-    const dialCodeMatches = [];
-    const dialCodeContains = [];
-    const initialsMatches = [];
+    if (query === "") {
+      // reset - back to all countries
+      matchedCountries = this.countries;
+    } else {
+      // search result groups, in order of priority
+      // first, exact ISO2 matches, then name starts with, then name contains, dial code match etc.
+      const iso2Matches = [];
+      const nameStartWith = [];
+      const nameContains = [];
+      const dialCodeMatches = [];
+      const dialCodeContains = [];
+      const initialsMatches = [];
 
-    for (const c of this.countries) {
-      if (isReset || queryLength === 0) {
-        nameContains.push(c);
-      } else if (c.iso2 === normalisedQuery) {
-        iso2Matches.push(c);
-      } else if (c.normalisedName.startsWith(normalisedQuery)) {
-        nameStartWith.push(c);
-      } else if (c.normalisedName.includes(normalisedQuery)) {
-        nameContains.push(c);
-      } else if (normalisedQuery === c.dialCode || normalisedQuery === c.dialCodePlus) {
-        dialCodeMatches.push(c);
-      } else if (c.dialCodePlus.includes(normalisedQuery)) {
-        dialCodeContains.push(c);
-      } else if (c.initials.includes(normalisedQuery)) {
-        initialsMatches.push(c);
+      for (const c of this.countries) {
+        if (c.iso2 === normalisedQuery) {
+          iso2Matches.push(c);
+        } else if (c.normalisedName.startsWith(normalisedQuery)) {
+          nameStartWith.push(c);
+        } else if (c.normalisedName.includes(normalisedQuery)) {
+          nameContains.push(c);
+        } else if (normalisedQuery === c.dialCode || normalisedQuery === c.dialCodePlus) {
+          dialCodeMatches.push(c);
+        } else if (c.dialCodePlus.includes(normalisedQuery)) {
+          dialCodeContains.push(c);
+        } else if (c.initials.includes(normalisedQuery)) {
+          initialsMatches.push(c);
+        }
       }
-    }
 
-    // Combine result groups in correct order (and respect country priority order within each group e.g. if search +44, then UK appears first above Guernsey etc)
-    const matchedCountries = [
-      ...iso2Matches.sort((a, b) => a.priority - b.priority),
-      ...nameStartWith.sort((a, b) => a.priority - b.priority),
-      ...nameContains.sort((a, b) => a.priority - b.priority),
-      ...dialCodeMatches.sort((a, b) => a.priority - b.priority),
-      ...dialCodeContains.sort((a, b) => a.priority - b.priority),
-      ...initialsMatches.sort((a, b) => a.priority - b.priority),
-    ];
+      // Combine result groups in correct order (and respect country priority order within each group e.g. if search +44, then UK appears first above Guernsey etc)
+      matchedCountries = [
+        ...iso2Matches.sort((a, b) => a.priority - b.priority),
+        ...nameStartWith.sort((a, b) => a.priority - b.priority),
+        ...nameContains.sort((a, b) => a.priority - b.priority),
+        ...dialCodeMatches.sort((a, b) => a.priority - b.priority),
+        ...dialCodeContains.sort((a, b) => a.priority - b.priority),
+        ...initialsMatches.sort((a, b) => a.priority - b.priority),
+      ];
+    }
 
     for (const c of matchedCountries) {
       const listItem = c.nodeById[this.id];
@@ -1597,40 +1652,46 @@ export class Iti {
     const dialCodeMatch = this._getDialCode(number, true);
     const numeric = getNumeric(number);
     if (dialCodeMatch) {
+      // we have a match, so we WILL be selecting a country (unless it's already selected)
       const dialCodeMatchNumeric = getNumeric(dialCodeMatch);
       const iso2Codes = this.dialCodeToIso2Map[dialCodeMatchNumeric];
 
-      //* If they've just typed a dial code (from empty state), and it matches the last selected country, then stick to that country.
-      //* e.g. if they select Aland Islands, then type it's dial code +358, we should stick to that country and not switch to Finland!
+      // SINGLE country found for the typed dialcode/areacode
+      if (iso2Codes.length === 1) {
+        // if it's already selected, then no change
+        if (iso2Codes[0] === selectedIso2) {
+          return null;
+        }
+        // it's not already selected, so change
+        return iso2Codes[0];
+      }
+
+      // MULTIPLE countries found for the typed dialcode/areacode
+
+      //* If they've just typed a dial code (from empty state), and it matches the last selected country (this.defaultCountry), then stick to that country e.g. if they select Aland Islands, then type it's dial code +358, we should stick to that country and not switch to Finland!
       if (!selectedIso2 && this.defaultCountry && iso2Codes.includes(this.defaultCountry)) {
         return this.defaultCountry;
       }
 
-      //* Check if the right country is already selected (note: might be empty state - globe icon).
-      // If the currently selected country has area codes, but none of them even partially matched the input number, then we need to switch to the default country for this dial code, so alreadySelected should be false
-      const hasAreaCodesButNoneMatched = this.selectedCountryData.areaCodes && numeric.length > dialCodeMatchNumeric.length;
-      const alreadySelected = selectedIso2 && iso2Codes.includes(selectedIso2) && !hasAreaCodesButNoneMatched;
-
+      // if they're typing a regionless NANP number and they already have a NANP country selected, then don't change the country
       const isRegionlessNanpNumber =
         selectedDialCode === "1" && isRegionlessNanp(numeric);
+      if (isRegionlessNanpNumber) {
+        return null;
+      }
 
-      //* Only update the country if:
-      //* A) NOT (we currently have a NANP country selected, and the number is a regionlessNanp)
-      //* AND
-      //* B) the right country is not already selected
-      if (!isRegionlessNanpNumber && !alreadySelected) {
-        //* If using onlyCountries option, iso2Codes[0] may be empty, so we must find the first non-empty index.
-        for (const iso2 of iso2Codes) {
-          if (iso2) {
-            return iso2;
-          }
-        }
+      //* Check if the right country is already selected (note: might be empty state - globe icon).
+      // If the currently selected country has area codes, and they've typed more digits than the best area code match, then that means none of the area codes matched the input number, as a full area code match would have resulted in a single country match above.
+      const hasAreaCodesButNoneMatched = this.selectedCountryData.areaCodes && numeric.length > dialCodeMatchNumeric.length;
+      const alreadySelected = selectedIso2 && iso2Codes.includes(selectedIso2) && !hasAreaCodesButNoneMatched;
+      if (!alreadySelected) {
+        return iso2Codes[0];
       }
     } else if (number.charAt(0) === "+" && numeric.length) {
       //* Invalid dial code, so empty.
       //* Note: use getNumeric here because the number has not been formatted yet, so could contain bad chars.
       return "";
-    } else if ((!number || number === "+") && !this.selectedCountryData.iso2) {
+    } else if ((!number || number === "+") && !selectedIso2) {
       //* If no selected country, and user either clears the input, or just types a plus, then show default.
       return this.defaultCountry;
     }
@@ -2129,6 +2190,9 @@ export class Iti {
     this.telInput.removeEventListener("input", this._handleInputEvent as EventListener);
     if (this._handleKeydownEvent) {
       this.telInput.removeEventListener("keydown", this._handleKeydownEvent);
+    }
+    if (this._handlePasteEvent) {
+      this.telInput.removeEventListener("paste", this._handlePasteEvent);
     }
 
     //* Remove attribute of id instance: data-intl-tel-input-id.

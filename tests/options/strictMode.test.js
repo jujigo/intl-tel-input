@@ -3,12 +3,14 @@
  */
 
 const { userEvent } = require("@testing-library/user-event");
+const { fireEvent } = require("@testing-library/dom");
 const {
   initPlugin,
   teardown,
   stripFormattingChars,
   selectCountryAndTypePlaceholderNumberAsync,
   checkFlagSelected,
+  getPasteEventObject,
 } = require("../helpers/helpers");
 
 
@@ -150,6 +152,15 @@ describe("strictMode option", () => {
       expect(stripFormattingChars(input.value)).toBe(placeholderNumberClean);
     });
 
+    // this was a bug - the number was never capped
+    test("can type Canada ntl placeholder number and no more", async () => {
+      const placeholderNumberClean = await selectCountryAndTypePlaceholderNumberAsync(container, "ca", user, input);
+      // try typing extra digit, which should be ignored
+      await user.type(input, "1");
+      // sometimes AYT formatting is slightly different, so strip formatting chars
+      expect(stripFormattingChars(input.value)).toBe(placeholderNumberClean);
+    });
+
     test("can type UK ntl placeholder number and no more", async () => {
       const placeholderNumberClean = await selectCountryAndTypePlaceholderNumberAsync(container, "gb", user, input);
       // try typing extra digit, which should be ignored
@@ -165,6 +176,15 @@ describe("strictMode option", () => {
       await user.type(input, "1");
       // sometimes AYT formatting is slightly different, so strip formatting chars
       expect(stripFormattingChars(input.value)).toBe(placeholderNumberClean);
+    });
+
+    test("paste strips invalid chars, caps length, and formats", async () => {
+      await user.click(input);
+      const pastedContent = "+1a9./-:$@&*b8c7d+123123456";
+      const eventObject = getPasteEventObject(pastedContent);
+      // NOTE: could not get this working with user.paste
+      fireEvent.paste(input, eventObject);
+      expect(input.value).toBe("+1 987-123-1234");
     });
   });
 
@@ -260,9 +280,13 @@ describe("strictMode option", () => {
 
 // const allCountries = require("../../build/js/data");
 // const countryCodes = allCountries.map((country) => country.iso2);
+// const countriesAllowingExtraDigit = ["ax", "at", "by", "ba", "bg", "kh", "bq", "cd", "fi", "ga", "id", "ie", "lu", "my", "mm", "nz", "rs", "so", "tk", "tv", "vn", "zw"];
+// const countriesAllowingMultipleExtraDigits = ["at", "id", "mm", "tk"];
 
 // // NATIONAL MODE ENABLED
 // describe("strictMode, with nationalMode=true", () => {
+//   let input, iti, user, container;
+
 //   beforeEach(() => {
 //     user = userEvent.setup();
 //     const options = {
@@ -276,8 +300,23 @@ describe("strictMode option", () => {
 //     teardown(iti);
 //   });
 
-//   test.each(countryCodes)("can type intl placeholder number: %s", async (iso2) => {
-//     const placeholderNumberClean = await selectCountryAndTypePlaceholderNumberAsync(container, iso2, user, input);
+//   test.each(countryCodes)("can type ntl placeholder number and no more: %s", async (iso2) => {
+//     let placeholderNumberClean = await selectCountryAndTypePlaceholderNumberAsync(container, iso2, user, input);
+//     // try typing an extra digit, which should be ignored (in most cases - see below)
+//     await user.type(input, "1");
+
+//     // some countries allow an extra digit
+//     if (countriesAllowingExtraDigit.includes(iso2)) {
+//       placeholderNumberClean += "1";
+//       // try typing a second extra digit, which should be ignored (in most cases - see below)
+//       await user.type(input, "1");
+
+//       // some countries allow several extra digits which would be annoying to test, so give up here
+//       if (countriesAllowingMultipleExtraDigits.includes(iso2)) {
+//         placeholderNumberClean += "1";
+//       }
+//     }
+
 //     // sometimes AYT formatting is slightly different, so strip formatting chars
 //     expect(stripFormattingChars(input.value)).toBe(placeholderNumberClean);
 //   });
